@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.ipynb
+
+# C extensions
+*.so
+
+# VS Code
+.vscode
+
+# custom
+*.pkl
+*.pkl.json
+*.log.json
+*.sh
+data/
+exps/
+work_dirs/
