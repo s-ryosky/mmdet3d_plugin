@@ -411,6 +411,7 @@ class NuScenesVisDataset(NuScenesDataset):
                     window_height=window_height,
                     window_width=window_width,
                     viewpoint_path=viewpoint_path,
+                    online=online,
                 )
             else:
                 vis.reset_points(points)
@@ -442,7 +443,7 @@ class NuScenesVisDataset(NuScenesDataset):
                             bbox_color=np.asarray(get_color(k), dtype=np.float64) / 255,
                             points_in_box_color=np.asarray(get_color(k), dtype=np.float64) / 255,
                         )
-            pcd_img = vis.show(online)
+            pcd_img = vis.show()
             pcd_img = mmcv.image.rgb2bgr(pcd_img)
 
             # create canvas

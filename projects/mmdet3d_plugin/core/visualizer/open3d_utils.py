@@ -92,8 +92,6 @@ class Visualizer(Open3dVisualizer):
             The 3D bbox is in mode of Box3DMode.DEPTH with
             gravity_center (please refer to core.structures.box_3d_mode).
             Default: None.
-        save_path (str, optional): path to save visualized results.
-            Default: None.
         points_size (int, optional): the size of points to show on visualizer.
             Default: 2.
         point_color (tuple[float], optional): the color of points.
@@ -108,12 +106,16 @@ class Visualizer(Open3dVisualizer):
             ['lidar_bottom', 'camera_bottom']. Default: 'lidar_bottom'.
         mode (str, optional):  indicate type of the input points,
             available mode ['xyz', 'xyzrgb']. Default: 'xyz'.
+        window_heigh (int): the height of the window.
+        window_width (int): the width of the window.
+        viewpoint_path (str): the path to save and load viewpoint parameters.
+        online (bool): whether to visualize the results online.
+            Default: False.
     """
 
     def __init__(self,
                  points,
                  bbox3d=None,
-                 save_path=None,
                  points_size=2,
                  line_width=2,
                  point_color=(0.5, 0.5, 0.5),
@@ -125,11 +127,12 @@ class Visualizer(Open3dVisualizer):
                  mode='xyz',
                  window_height=1080,
                  window_width=1920,
-                 viewpoint_path=None):
+                 viewpoint_path=None,
+                 online=False):
 
         # init visualizer
         self.o3d_visualizer = o3d.visualization.Visualizer()
-        self.o3d_visualizer.create_window(width=window_width, height=window_height)
+        self.o3d_visualizer.create_window(width=window_width, height=window_height, visible=online)
         self.ctr = self.o3d_visualizer.get_view_control()
         mesh_frame = geometry.TriangleMesh.create_coordinate_frame(
             size=1, origin=[0, 0, 0])  # create coordinate frame
@@ -148,6 +151,7 @@ class Visualizer(Open3dVisualizer):
         self.center_mode = center_mode
         self.mode = mode
         self.viewpoint_path = viewpoint_path
+        self.online = online
         self.pcd = None
         self.seg_num = 0
 
@@ -192,12 +196,10 @@ class Visualizer(Open3dVisualizer):
                      bbox_color, points_in_box_color, self.rot_axis,
                      self.center_mode, self.mode)
 
-    def show(self, online=False, save_viewpoint=True):
+    def show(self, save_viewpoint=True):
         """Visualize the points cloud.
 
         Args:
-            online (bool): Whether to visualize the results online.
-                Default: False.
             save_path (str, optional): path to save image. Default: None.
         """
 
@@ -206,15 +208,15 @@ class Visualizer(Open3dVisualizer):
             viewpoint_param = o3d.io.read_pinhole_camera_parameters(self.viewpoint_path)
             self.ctr.convert_from_pinhole_camera_parameters(viewpoint_param)
 
-        if online:
+        if self.online:
             self.o3d_visualizer.run()
         else:
             self.o3d_visualizer.poll_events()
 
-        img = self.o3d_visualizer.capture_screen_float_buffer()
+        img = self.o3d_visualizer.capture_screen_float_buffer(do_render=True)
         img = (np.asarray(img)*255).astype(np.uint8)
 
-        if online:
+        if self.online:
             if save_viewpoint and self.viewpoint_path is not None:
                 viewpoint_param = self.ctr.convert_to_pinhole_camera_parameters()
                 o3d.io.write_pinhole_camera_parameters(self.viewpoint_path, viewpoint_param)
