@@ -471,7 +471,7 @@ class NuScenesVisDataset(NuScenesDataset):
                     out = cv2.VideoWriter(output_path, fourcc, video_frequency,
                                             (canvas.shape[1], canvas.shape[0]))
                     prev_scene_name = scene_name
-                out.write(canvas[:, :, ::-1])
+                out.write(canvas)
             else:
                 raise NotImplementedError()
             progress_bar.update()
