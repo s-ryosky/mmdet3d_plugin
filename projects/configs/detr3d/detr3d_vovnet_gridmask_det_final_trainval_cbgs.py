@@ -3,9 +3,6 @@ _base_ = [
     '../../../mmdetection3d/configs/_base_/default_runtime.py'
 ]
 
-plugin=True
-plugin_dir='projects/mmdet3d_plugin/'
-
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
 point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
@@ -222,6 +219,6 @@ total_epochs = 24
 evaluation = dict(interval=2, pipeline=test_pipeline)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
-load_from='../work_dirs/ckpts/detr3d/dd3d_det_final.pth'
+load_from='../work_dirs/ckpts/detr3d/pretrain/dd3d_det_final.pth'
 
 find_unused_parameters=True

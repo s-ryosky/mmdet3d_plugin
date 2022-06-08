@@ -136,20 +136,23 @@ class NuScenesVisDataset(NuScenesDataset):
 
     def preprocess(self, results=None):
         if results is not None:
-            assert self.load_interval == 1
-            if len(results) == len(self.data_infos):
-                for result, data_info in zip(results, self.data_infos):
-                    result['timestamp'] = data_info['timestamp']
-            elif len(results) == len(self.data_infos) * __class__.CAM_NUM:
+            if len(results) == len(self.data_infos) * __class__.CAM_NUM:
+                assert self.load_interval == 1
                 for i, data_info in enumerate(self.data_infos):
                     for j, cam in enumerate(__class__.CAMERA_TYPES):
                         result = results[i * __class__.CAM_NUM + j]
                         result['timestamp'] = data_info['cams'][cam]['timestamp']
+                self.data_infos = list(sorted(self.data_infos, key=lambda e: e['timestamp']))
+            elif len(results) == len(self.data_infos):
+                self.data_infos = list(sorted(self.data_infos, key=lambda e: e['timestamp']))
+                for result, data_info in zip(results, self.data_infos):
+                    result['timestamp'] = data_info['timestamp']
             else:
                 raise ValueError("The number of results is invalid.")
             results = list(sorted(results, key=lambda e: e['timestamp']))
-        self.data_infos = list(sorted(self.data_infos, key=lambda e: e['timestamp']))
-        # self.data_infos = self.data_infos[::self.load_interval]
+        else:
+            self.data_infos = list(sorted(self.data_infos, key=lambda e: e['timestamp']))
+        self.data_infos = self.data_infos[::self.load_interval]
         return results
 
     def import_nusc(self):
