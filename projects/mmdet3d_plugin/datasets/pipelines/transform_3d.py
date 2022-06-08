@@ -1,8 +1,151 @@
 import numpy as np
 from numpy import random
+import torch
 
 import mmcv
 from mmdet3d.datasets.builder import PIPELINES
+from mmdet3d.datasets.pipelines import RandomFlip3D, GlobalRotScaleTrans
+
+
+@PIPELINES.register_module()
+class RandomFlip3D_BEVDet(RandomFlip3D):
+    """Flip the points & bbox for BEVDet and BEVDet4D.
+
+    If the input dict contains the key "flip", then the flag will be used,
+    otherwise it will be randomly decided by a ratio specified in the init
+    method.
+
+    Args:
+        sync_2d (bool, optional): Whether to apply flip according to the 2D
+            images. If True, it will apply the same flip as that to 2D images.
+            If False, it will decide whether to flip randomly and independently
+            to that of 2D images. Defaults to True.
+        flip_ratio_bev_horizontal (float, optional): The flipping probability
+            in horizontal direction. Defaults to 0.0.
+        flip_ratio_bev_vertical (float, optional): The flipping probability
+            in vertical direction. Defaults to 0.0.
+        update_img2lidar (bool): Whether to update the transformation matrix.
+            Defaults to False.
+    """
+
+    def __init__(self,
+                 sync_2d=True,
+                 flip_ratio_bev_horizontal=0.0,
+                 flip_ratio_bev_vertical=0.0,
+                 update_img2lidar=False,
+                 **kwargs):
+        super(RandomFlip3D_BEVDet, self).__init__(
+            sync_2d=sync_2d,
+            flip_ratio_bev_horizontal=flip_ratio_bev_horizontal,
+            flip_ratio_bev_vertical=flip_ratio_bev_vertical,
+            **kwargs)
+        self.update_img2lidar = update_img2lidar
+
+    def update_transform(self, input_dict):
+        transform = torch.zeros((input_dict['img_inputs'][1].shape[0],4,4)).float()
+        transform[:,:3,:3] = input_dict['img_inputs'][1]
+        transform[:,:3,-1] = input_dict['img_inputs'][2]
+        transform[:, -1, -1] = 1.0
+
+        aug_transform = torch.eye(4).float()
+        if input_dict['pcd_horizontal_flip']:
+            aug_transform[1,1] = -1
+        if input_dict['pcd_vertical_flip']:
+            aug_transform[0,0] = -1
+        aug_transform = aug_transform.view(1,4,4)
+        new_transform = aug_transform.matmul(transform)
+        input_dict['img_inputs'][1][...] = new_transform[:,:3,:3]
+        input_dict['img_inputs'][2][...] = new_transform[:,:3,-1]
+
+    def __call__(self, input_dict):
+        """Call function to flip points, values in the ``bbox3d_fields`` and \
+        also flip 2D image and its annotations.
+
+        Args:
+            input_dict (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Flipped results, 'flip', 'flip_direction', \
+                'pcd_horizontal_flip' and 'pcd_vertical_flip' keys are added \
+                into result dict.
+        """
+        super(RandomFlip3D_BEVDet, self).__call__(input_dict)
+
+        if 'img_inputs' in input_dict:
+            assert self.update_img2lidar
+            self.update_transform(input_dict)
+        return input_dict
+
+
+@PIPELINES.register_module()
+class GlobalRotScaleTrans_BEVDet(GlobalRotScaleTrans):
+    """Apply global rotation, scaling and translation to a 3D scene.
+
+    Args:
+        rot_range (list[float], optional): Range of rotation angle.
+            Defaults to [-0.78539816, 0.78539816] (close to [-pi/4, pi/4]).
+        scale_ratio_range (list[float], optional): Range of scale ratio.
+            Defaults to [0.95, 1.05].
+        translation_std (list[float], optional): The standard deviation of
+            translation noise applied to a scene, which
+            is sampled from a gaussian distribution whose standard deviation
+            is set by ``translation_std``. Defaults to [0, 0, 0]
+        shift_height (bool, optional): Whether to shift height.
+            (the fourth dimension of indoor points) when scaling.
+            Defaults to False.
+        update_img2lidar (bool): Whether to update the transformation matrix.
+            Defaults to False.
+    """
+
+    def __init__(self,
+                 rot_range=[-0.78539816, 0.78539816],
+                 scale_ratio_range=[0.95, 1.05],
+                 translation_std=[0, 0, 0],
+                 shift_height=False,
+                 update_img2lidar=False):
+        super(GlobalRotScaleTrans_BEVDet, self).__init__(
+            rot_range=rot_range,
+            scale_ratio_range=scale_ratio_range,
+            translation_std=translation_std,
+            shift_height=shift_height)
+        self.update_img2lidar = update_img2lidar
+
+    def update_transform(self, input_dict):
+        transform = torch.zeros((input_dict['img_inputs'][1].shape[0],4,4)).float()
+        transform[:,:3,:3] = input_dict['img_inputs'][1]
+        transform[:,:3,-1] = input_dict['img_inputs'][2]
+        transform[:, -1, -1] = 1.0
+
+        aug_transform = torch.zeros((input_dict['img_inputs'][1].shape[0],4,4)).float()
+        if 'pcd_rotation' in input_dict:
+            aug_transform[:,:3,:3] = input_dict['pcd_rotation'].T * input_dict['pcd_scale_factor']
+        else:
+            aug_transform[:, :3, :3] = torch.eye(3).view(1,3,3) * input_dict['pcd_scale_factor']
+        aug_transform[:,:3,-1] = torch.from_numpy(input_dict['pcd_trans']).reshape(1,3)
+        aug_transform[:, -1, -1] = 1.0
+
+        new_transform = aug_transform.matmul(transform)
+        input_dict['img_inputs'][1][...] = new_transform[:,:3,:3]
+        input_dict['img_inputs'][2][...] = new_transform[:,:3,-1]
+
+    def __call__(self, input_dict):
+        """Private function to rotate, scale and translate bounding boxes and \
+        points.
+
+        Args:
+            input_dict (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Results after scaling, 'points', 'pcd_rotation',
+                'pcd_scale_factor', 'pcd_trans' and keys in \
+                input_dict['bbox3d_fields'] are updated in the result dict.
+        """
+        super(GlobalRotScaleTrans_BEVDet, self).__call__(input_dict)
+
+        if 'img_inputs' in input_dict:
+            assert self.update_img2lidar
+            self.update_transform(input_dict)
+        return input_dict
 
 
 @PIPELINES.register_module()
