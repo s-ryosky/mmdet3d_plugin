@@ -1,7 +1,6 @@
-import math
-
 import torch
 import torch.nn as nn
+
 from mmcv.cnn.bricks.registry import ATTENTION
 from mmcv.runner.base_module import BaseModule
 

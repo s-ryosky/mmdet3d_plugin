@@ -3,18 +3,17 @@ from os import path as osp
 
 import cv2
 import math
-import mmcv
 import numpy as np
 from nuscenes.nuscenes import NuScenes
 import pyquaternion
 import torch
 
+import mmcv
 from mmdet3d.core import bbox3d2result, box3d_multiclass_nms, xywhr2xyxyr
 from mmdet3d.core.bbox import (Box3DMode, Coord3DMode,
                                CameraInstance3DBoxes, LiDARInstance3DBoxes)
 from mmdet3d.core.visualizer.image_vis import draw_camera_bbox3d_on_img, draw_lidar_bbox3d_on_img
 from mmdet3d.datasets import NuScenesDataset
-from mmdet3d.datasets.builder import DATASETS
 from mmdet3d.datasets.nuscenes_mono_dataset import (output_to_nusc_box,
                                                     cam_nusc_box_to_global,
                                                     nusc_box_to_cam_box3d)
@@ -25,6 +24,8 @@ from mmdet3d_plugin.core.visualizer.image_utils import (lidar_corners3d_to_img,
                                                         cam_corners3d_to_img,
                                                         check_box3d_in_image)
 from mmdet3d_plugin.core.visualizer.open3d_utils import Visualizer
+
+from . import DATASETS
 
 
 @DATASETS.register_module()
