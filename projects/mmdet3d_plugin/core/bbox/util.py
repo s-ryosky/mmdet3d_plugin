@@ -51,3 +51,25 @@ def denormalize_bbox(normalized_bboxes, pc_range):
     else:
         denormalized_bboxes = torch.cat([cx, cy, cz, w, l, h, rot], dim=-1)
     return denormalized_bboxes
+
+def bbox3d_mapping_back(bboxes, rot_degree, scale_factor, flip_horizontal, flip_vertical):
+    """Map bboxes from testing scale to original image scale.
+
+    Args:
+        bboxes (:obj:`BaseInstance3DBoxes`): Boxes to be mapped back.
+        scale_factor (float): Scale factor.
+        flip_horizontal (bool): Whether to flip horizontally.
+        flip_vertical (bool): Whether to flip vertically.
+
+    Returns:
+        :obj:`BaseInstance3DBoxes`: Boxes mapped back.
+    """
+    new_bboxes = bboxes.clone()
+    if flip_horizontal:
+        new_bboxes.flip('horizontal')
+    if flip_vertical:
+        new_bboxes.flip('vertical')
+    new_bboxes.scale(1 / scale_factor)
+    new_bboxes.rotate(-rot_degree)
+
+    return new_bboxes
