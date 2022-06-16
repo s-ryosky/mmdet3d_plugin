@@ -46,6 +46,7 @@ class Detr3DHead(DETRHead):
             self.code_weights = code_weights
         else:
             self.code_weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2]
+        self.code_weights = self.code_weights[:self.code_size]
         
         self.bbox_coder = build_bbox_coder(bbox_coder)
         self.pc_range = self.bbox_coder.pc_range
@@ -209,7 +210,8 @@ class Detr3DHead(DETRHead):
         label_weights = gt_bboxes.new_ones(num_bboxes)
 
         # bbox targets
-        bbox_targets = torch.zeros_like(bbox_pred)[..., :9]
+        code_size = gt_bboxes.size(1)
+        bbox_targets = torch.zeros_like(bbox_pred)[..., :code_size]
         bbox_weights = torch.zeros_like(bbox_pred)
         bbox_weights[pos_inds] = 1.0
 
@@ -345,7 +347,7 @@ class Detr3DHead(DETRHead):
              gt_bboxes_ignore=None):
         """"Loss function.
         Args:
-            
+
             gt_bboxes_list (list[Tensor]): Ground truth bboxes for each image
                 with shape (num_gts, 4) in [tl_x, tl_y, br_x, br_y] format.
             gt_labels_list (list[Tensor]): Ground truth class indices for each
@@ -438,7 +440,7 @@ class Detr3DHead(DETRHead):
             preds = preds_dicts[i]
             bboxes = preds['bboxes']
             bboxes[:, 2] = bboxes[:, 2] - bboxes[:, 5] * 0.5
-            bboxes = img_metas[i]['box_type_3d'](bboxes, 9)
+            bboxes = img_metas[i]['box_type_3d'](bboxes, bboxes.size(-1))
             scores = preds['scores']
             labels = preds['labels']
             ret_list.append([bboxes, scores, labels])

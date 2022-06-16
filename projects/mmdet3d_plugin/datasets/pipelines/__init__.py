@@ -7,7 +7,8 @@ from .loading import (
 from .test_time_aug import MultiRotScaleFlipAug3D
 from .transform_3d import (
     RandomFlip3D_BEVDet, GlobalRotScaleTrans_BEVDet,
-    PadMultiViewImage, NormalizeMultiviewImage, 
+    PadMultiViewImage, NormalizeMultiviewImage,
+    ResizeCropFlipImage, GlobalRotScaleTransImage,
     PhotoMetricDistortionMultiViewImage, CropMultiViewImage,
     RandomScaleImageMultiViewImage,
     HorizontalRandomFlipMultiViewImage,
@@ -24,7 +25,9 @@ __all__ = [
     'RandomFlip3D_BEVDet',
     'GlobalRotScaleTrans_BEVDet',
     'PadMultiViewImage',
-    'NormalizeMultiviewImage', 
+    'NormalizeMultiviewImage',
+    'ResizeCropFlipImage',
+    'GlobalRotScaleTransImage',
     'PhotoMetricDistortionMultiViewImage',
     'CropMultiViewImage',
     'RandomScaleImageMultiViewImage',

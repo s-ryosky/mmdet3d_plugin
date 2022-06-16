@@ -346,6 +346,138 @@ def output_to_nusc_box(detection, info, speed_mode,
 
 
 @DATASETS.register_module()
+class NuScenesPETRDataset(NuScenesDataset):
+    r"""NuScenes Dataset for PETR.
+
+    This class serves as the API for experiments on the NuScenes Dataset.
+
+    Please refer to `NuScenes Dataset <https://www.nuscenes.org/download>`_
+    for data downloading.
+
+    Args:
+        ann_file (str): Path of annotation file.
+        pipeline (list[dict], optional): Pipeline used for data processing.
+            Defaults to None.
+        data_root (str): Path of dataset root.
+        classes (tuple[str], optional): Classes used in the dataset.
+            Defaults to None.
+        load_interval (int, optional): Interval of loading the dataset. It is
+            used to uniformly sample the dataset. Defaults to 1.
+        with_velocity (bool, optional): Whether include velocity prediction
+            into the experiments. Defaults to True.
+        modality (dict, optional): Modality to specify the sensor data used
+            as input. Defaults to None.
+        box_type_3d (str, optional): Type of 3D box of this dataset.
+            Based on the `box_type_3d`, the dataset will encapsulate the box
+            to its original format then converted them to `box_type_3d`.
+            Defaults to 'LiDAR' in this dataset. Available options includes.
+            - 'LiDAR': Box in LiDAR coordinates.
+            - 'Depth': Box in depth coordinates, usually for indoor dataset.
+            - 'Camera': Box in camera coordinates.
+        filter_empty_gt (bool, optional): Whether to filter empty GT.
+            Defaults to True.
+        test_mode (bool, optional): Whether the dataset is in test mode.
+            Defaults to False.
+        eval_version (bool, optional): Configuration version of evaluation.
+            Defaults to  'detection_cvpr_2019'.
+        use_valid_flag (bool, optional): Whether to use `use_valid_flag` key
+            in the info file as mask to filter gt_boxes and gt_names.
+            Defaults to False.
+    """
+
+    def __init__(self,
+                 ann_file,
+                 pipeline=None,
+                 data_root=None,
+                 classes=None,
+                 load_interval=1,
+                 with_velocity=True,
+                 modality=None,
+                 box_type_3d='LiDAR',
+                 filter_empty_gt=True,
+                 test_mode=False,
+                 eval_version='detection_cvpr_2019',
+                 use_valid_flag=False):
+        super().__init__(
+            ann_file=ann_file,
+            pipeline=pipeline,
+            data_root=data_root,
+            classes=classes,
+            load_interval=load_interval,
+            with_velocity=with_velocity,
+            modality=modality,
+            box_type_3d=box_type_3d,
+            filter_empty_gt=filter_empty_gt,
+            test_mode=test_mode,
+            eval_version=eval_version,
+            use_valid_flag=use_valid_flag)
+
+    def get_data_info(self, index):
+        """Get data info according to the given index.
+
+        Args:
+            index (int): Index of the sample data to get.
+
+        Returns:
+            dict: Data information that will be passed to the data
+                preprocessing pipelines. It includes the following keys:
+
+                - sample_idx (str): Sample index.
+                - pts_filename (str): Filename of point clouds.
+                - sweeps (list[dict]): Infos of sweeps.
+                - timestamp (float): Sample timestamp.
+                - img_filename (str, optional): Image filename.
+                - lidar2img (list[np.ndarray], optional): Transformations
+                    from lidar to different cameras.
+                - ann_info (dict): Annotation info.
+        """
+        info = self.data_infos[index]
+        # standard protocol modified from SECOND.Pytorch
+        input_dict = dict(
+            sample_idx=info['token'],
+            pts_filename=info['lidar_path'],
+            sweeps=info['sweeps'],
+            timestamp=info['timestamp'] / 1e6,
+        )
+
+        if self.modality['use_camera']:
+            image_paths = []
+            lidar2img_rts = []
+            intrinsics = []
+            extrinsics = []
+            for cam_type, cam_info in info['cams'].items():
+                image_paths.append(cam_info['data_path'])
+                # obtain lidar to image transformation matrix
+                lidar2cam_r = np.linalg.inv(cam_info['sensor2lidar_rotation'])
+                lidar2cam_t = cam_info[
+                    'sensor2lidar_translation'] @ lidar2cam_r.T
+                lidar2cam_rt = np.eye(4)
+                lidar2cam_rt[:3, :3] = lidar2cam_r.T
+                lidar2cam_rt[3, :3] = -lidar2cam_t
+                intrinsic = cam_info['cam_intrinsic']
+                viewpad = np.eye(4)
+                viewpad[:intrinsic.shape[0], :intrinsic.shape[1]] = intrinsic
+                lidar2img_rt = (viewpad @ lidar2cam_rt.T)
+                intrinsics.append(viewpad)
+                extrinsics.append(lidar2cam_rt)
+                lidar2img_rts.append(lidar2img_rt)
+
+            input_dict.update(
+                dict(
+                    img_filename=image_paths,
+                    lidar2img=lidar2img_rts,
+                    intrinsics=intrinsics,
+                    extrinsics=extrinsics,
+                ))
+
+        if not self.test_mode:
+            annos = self.get_ann_info(index)
+            input_dict['ann_info'] = annos
+
+        return input_dict
+
+
+@DATASETS.register_module()
 class NuScenesUVTRDataset(NuScenesDataset):
     r"""NuScenes Dataset for BEVDet and BEVDet4D.
 
