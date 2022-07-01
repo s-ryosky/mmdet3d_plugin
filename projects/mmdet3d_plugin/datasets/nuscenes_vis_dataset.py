@@ -1,4 +1,5 @@
 import copy
+import pandas as pd
 from os import path as osp
 
 import cv2
@@ -23,6 +24,7 @@ from mmdet3d_plugin.core.visualizer.image_utils import (lidar_corners3d_to_img,
                                                         lidar_corners3d_to_cam,
                                                         cam_corners3d_to_img,
                                                         check_box3d_in_image)
+from mmdet3d_plugin.core.visualizer.image_vis import draw_pts_on_img
 from mmdet3d_plugin.core.visualizer.open3d_utils import Visualizer
 
 from . import DATASETS
@@ -447,6 +449,142 @@ class NuScenesVisDataset(NuScenesDataset):
                             bbox_color=np.asarray(get_color(k), dtype=np.float64) / 255,
                             points_in_box_color=np.asarray(get_color(k), dtype=np.float64) / 255,
                         )
+            pcd_img = vis.show()
+            pcd_img = mmcv.image.rgb2bgr(pcd_img)
+
+            # create canvas
+            if canvas_type == 'v1':
+                canvas = create_canvas(pcd_img, imgs)
+            elif canvas_type == 'v2':
+                canvas = create_canvas_v2(pcd_img, imgs)
+            else:
+                raise NotImplementedError()
+
+            # output
+            if out_format == 'image':
+                result_path = osp.join(out_dir, f'{file_name}.png')
+                mmcv.imwrite(canvas, result_path)
+            elif out_format == 'video':
+                scene_name = self.get_scene_name(data_info['token'])
+                if scene_name != prev_scene_name:
+                    if prev_scene_name is not None:
+                        # close current video
+                        print("\nSaved a video into %s" % output_path)
+                        out.release()
+                    # create new video
+                    output_path = osp.join(out_dir, scene_name+".avi")
+                    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+                    out = cv2.VideoWriter(output_path, fourcc, video_frequency,
+                                            (canvas.shape[1], canvas.shape[0]))
+                    prev_scene_name = scene_name
+                out.write(canvas)
+            else:
+                raise NotImplementedError()
+            progress_bar.update()
+
+    def show_img(
+        self,
+        out_dir,
+        online=False,
+        out_format='video',
+        pipeline=None,
+        viewpoint_path=None,
+        canvas_type='v2',
+        draw_points_in_imgs=False,
+        print_timestamp=False,
+    ):
+        """Visualization.
+
+        Args:
+            out_dir (str): Output directory of visualization result.
+            online (bool): Whether to visualize the results online.
+                Default: False.
+            out_format (str): Output file format (image or video).
+            pipeline (list[dict], optional): raw data loading for showing.
+                Default: None.
+            viewpoint_path (str): Output path of viewpoint parameters.
+            canvas_type (str): Type of visualization format (v1 or v2).
+            draw_points_in_imgs (bool):
+                Whether to visualize point cloud drawn on the images.
+                Default: False.
+            print_timestamp (bool):
+                Whether to print timestamp for each data. Default: False.
+        """
+        if out_format == 'video':
+            assert not online
+            self.import_nusc()
+        video_frequency = 5
+        if canvas_type == 'v1':
+            window_height=960
+            window_width=1280
+        elif canvas_type == 'v2':
+            window_height=800
+            window_width=600
+        else:
+            raise NotImplementedError()
+
+        assert out_dir is not None, 'Expect out_dir, got none.'
+        mmcv.mkdir_or_exist(out_dir)
+        mmcv.mkdir_or_exist(osp.dirname(viewpoint_path))
+
+        vis = None
+        pipeline = self._get_pipeline(pipeline)
+        prev_scene_name, out = None, None
+        progress_bar = mmcv.ProgressBar(len(self.data_infos))
+        for i, data_info in enumerate(self.data_infos):
+            # prepare lidar point clouds
+            pts_path = data_info['lidar_path']
+            file_name = osp.split(pts_path)[-1].split('.')[0]
+            points = self._extract_data(i, pipeline, 'points').numpy()
+
+            if print_timestamp:
+                timestamp_lidar = data_info['timestamp']
+                time_lidar = pd.to_datetime(timestamp_lidar*1000)
+                print(f"\nTime of lidar: {time_lidar}")
+
+            imgs = {}
+            for j in range(__class__.CAM_NUM):
+                cam = __class__.CAMERA_TYPES[j]
+
+                if print_timestamp:
+                    timestamp_cam = data_info['cams'][cam]['timestamp']
+                    time_cam = pd.to_datetime(timestamp_cam*1000)
+                    print(f"Time of {cam}: {time_cam}")
+
+                # load an image
+                cam_info = data_info['cams'][cam]
+                img = mmcv.imread(cam_info['data_path'])  # (900, 1600, 3)
+
+                # obtain lidar to image transformation matrix
+                _, _, lidar2img_rt = get_transform_matrix(cam_info)
+
+                # draw point cloud on images
+                if draw_points_in_imgs:
+                    img = draw_pts_on_img(points, img, lidar2img_rt, radius=3)
+
+                imgs[cam] = img
+
+            # visualize bboxes on lidar point clouds
+            points = Coord3DMode.convert_point(
+                points, Coord3DMode.LIDAR, Coord3DMode.DEPTH
+            )
+            if online or vis is None:
+                del vis
+                vis = Visualizer(
+                    points,
+                    points_size=1,
+                    line_width=1,
+                    point_color=(1, 1, 1),
+                    background_color=(0.25, 0.25, 0.25),
+                    points_in_box_color=(1, 1, 1),
+                    window_height=window_height,
+                    window_width=window_width,
+                    viewpoint_path=viewpoint_path,
+                    online=online,
+                )
+            else:
+                vis.reset_points(points)
+
             pcd_img = vis.show()
             pcd_img = mmcv.image.rgb2bgr(pcd_img)
 
