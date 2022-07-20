@@ -7,11 +7,11 @@ import numpy as np
 from pyquaternion import Quaternion
 
 
-def add_adj_info(dataroot):
+def add_adj_info(dataroot, extra_tag_key, extra_tag):
     interval = 3
     max_adj = 60
     for set in ['train', 'val']:
-        info_path = osp.join(dataroot, 'nuscenes_infos_%s.pkl' % set)
+        info_path = osp.join(dataroot, '%s_infos_%s.pkl' % (extra_tag_key, set))
         dataset = pickle.load(open(info_path, 'rb'))
         nuscenes_version = 'v1.0-trainval'
         nuscenes = NuScenes(nuscenes_version, dataroot)
@@ -90,7 +90,7 @@ def add_adj_info(dataroot):
             dataset['infos'][id]['velo'] = velocity_lidar
             dataset['infos'][id]['gt_velocity'] = dataset['infos'][id]['gt_velocity'] - velocity_lidar.reshape(1, 2)
 
-        info_path = osp.join(dataroot, 'nuscenes_infos_%s_4d_interval%d_max%d.pkl' % (set, interval, max_adj))
+        info_path = osp.join(dataroot, '%s_infos_%s_4d_interval%d_max%d.pkl' % (extra_tag, set, interval, max_adj))
         with open(info_path, 'wb') as fid:
             pickle.dump(dataset, fid)
 
@@ -101,7 +101,9 @@ parser.add_argument(
     type=str,
     default='./data/nuscenes',
     help='specify the root path of dataset')
+parser.add_argument('--extra-tag-key', type=str, default='nuscenes')
+parser.add_argument('--extra-tag', type=str, default='nuscenes_bevdet4d')
 args = parser.parse_args()
 
 if __name__=='__main__':
-    add_adj_info(args.root_path)
+    add_adj_info(args.root_path, args.extra_tag_key, args.extra_tag)
