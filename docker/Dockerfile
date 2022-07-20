@@ -30,21 +30,25 @@ RUN apt-get update && \
 RUN pip install seaborn==0.11.2
 ARG PYTORCH
 ARG CUDA
-ARG MMCV="1.5.0"
-ARG MMDET="2.19.0"
-ARG MMSEG="0.20.0"
+ARG MMCV="1.5.3"
+ARG MMDET="2.24.0"
+ARG MMSEG="0.24.0"
 RUN ["/bin/bash", "-c", "pip install --no-cache-dir mmcv-full==${MMCV} -f https://download.openmmlab.com/mmcv/dist/cu${CUDA//./}/torch${PYTORCH}/index.html"]
 RUN pip install --no-cache-dir mmdet==${MMDET} mmsegmentation==${MMSEG}
 
 # Install MMDetection3D
 RUN conda clean --all
-COPY . /mmdetection3d
+RUN git clone https://github.com/open-mmlab/mmdetection3d.git /mmdetection3d
 WORKDIR /mmdetection3d
+RUN git checkout b1ea1a881b0f790cd5887921e1d3733b6d72367e
 ENV FORCE_CUDA="1"
 RUN pip install -r requirements/build.txt
 RUN pip install --no-cache-dir -e .
 RUN pip install -r requirements/optional.txt
 RUN pip install --ignore-installed protobuf==3.8.0
+
+# Install python packages for MMDet3D plugin
+RUN pip install einops==0.4.1
 
 # Set time zone
 ENV TZ=Asia/Tokyo

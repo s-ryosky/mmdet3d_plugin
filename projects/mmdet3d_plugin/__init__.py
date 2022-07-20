@@ -6,7 +6,8 @@ from .datasets.pipelines import (
     UnifiedDataBaseSampler,
     CollectUnified3D,
     LoadMultiViewImageFromFiles_BEVDet,
-    LoadMultiViewMultiSweepImageFromFiles,
+    LoadMultiViewMultiSweepImageFromFiles_PETR,
+    LoadMultiViewMultiSweepImageFromFiles_UVTR,
     LoadPointsFromFile_BEVDet,
     MultiRotScaleFlipAug3D,
     RandomFlip3D_BEVDet, GlobalRotScaleTrans_BEVDet,
@@ -36,6 +37,7 @@ from .models.detectors.uvtr_kd_cs import UVTRKDCS
 from .models.detectors.uvtr_kd_l import UVTRKDL
 from .models.detectors.uvtr_kd_m import UVTRKDM
 from .models.detectors.uvtr import UVTR
+from .models.losses import *
 from .models.necks.cp_fpn import CPFPN
 from .models.necks.lss_fpn import FPN_LSS
 from .models.necks.second3d_fpn import SECOND3DFPN

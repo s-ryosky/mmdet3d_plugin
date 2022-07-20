@@ -1,3 +1,4 @@
+import tempfile
 from os import path as osp
 
 import numpy as np
@@ -445,7 +446,9 @@ class NuScenesPETRDataset(NuScenesDataset):
             lidar2img_rts = []
             intrinsics = []
             extrinsics = []
+            img_timestamp = []
             for cam_type, cam_info in info['cams'].items():
+                img_timestamp.append(cam_info['timestamp'] / 1e6)
                 image_paths.append(cam_info['data_path'])
                 # obtain lidar to image transformation matrix
                 lidar2cam_r = np.linalg.inv(cam_info['sensor2lidar_rotation'])
@@ -464,6 +467,7 @@ class NuScenesPETRDataset(NuScenesDataset):
 
             input_dict.update(
                 dict(
+                    img_timestamp=img_timestamp,
                     img_filename=image_paths,
                     lidar2img=lidar2img_rts,
                     intrinsics=intrinsics,
@@ -475,6 +479,279 @@ class NuScenesPETRDataset(NuScenesDataset):
             input_dict['ann_info'] = annos
 
         return input_dict
+
+
+@DATASETS.register_module()
+class NuScenesPETRV2Dataset(NuScenesDataset):
+    r"""NuScenes Dataset.
+    This datset only add camera intrinsics and extrinsics to the results.
+    """
+
+    def __init__(self,
+                 ann_file,
+                 lane_ann_file,
+                 pipeline=None,
+                 data_root=None,
+                 classes=None,
+                 load_interval=1,
+                 with_velocity=True,
+                 modality=None,
+                 box_type_3d='LiDAR',
+                 filter_empty_gt=True,
+                 test_mode=False,
+                 eval_version='detection_cvpr_2019',
+                 use_valid_flag=False):
+        super().__init__(
+                ann_file=ann_file,
+                 pipeline=pipeline,
+                 data_root=data_root,
+                 classes=classes,
+                 load_interval=load_interval,
+                 with_velocity=with_velocity,
+                 modality=modality,
+                 box_type_3d=box_type_3d,
+                 filter_empty_gt=filter_empty_gt,
+                 test_mode=test_mode,
+                 eval_version=eval_version,
+                 use_valid_flag=use_valid_flag)
+        self.lane_infos = self.load_annotations(lane_ann_file)
+
+    def get_data_info(self, index):
+        """Get data info according to the given index.
+        Args:
+            index (int): Index of the sample data to get.
+        Returns:
+            dict: Data information that will be passed to the data \
+                preprocessing pipelines. It includes the following keys:
+
+                - sample_idx (str): Sample index.
+                - pts_filename (str): Filename of point clouds.
+                - sweeps (list[dict]): Infos of sweeps.
+                - timestamp (float): Sample timestamp.
+                - img_filename (str, optional): Image filename.
+                - lidar2img (list[np.ndarray], optional): Transformations \
+                    from lidar to different cameras.
+                - ann_info (dict): Annotation info.
+        """
+        info = self.data_infos[index]
+        lane_info=self.lane_infos[index]
+        # standard protocal modified from SECOND.Pytorch
+        input_dict = dict(
+            sample_idx=info['token'],
+            # lidar_token=info['lidar_token'],
+            pts_filename=info['lidar_path'],
+            sweeps=info['sweeps'],
+            timestamp=info['timestamp'] / 1e6,
+            map_filename=lane_info['maps']['map_mask'],
+        )
+
+        if self.modality['use_camera']:
+            image_paths = []
+            lidar2img_rts = []
+            intrinsics = []
+            extrinsics = []
+            img_timestamp = []
+            for cam_type, cam_info in info['cams'].items():
+                img_timestamp.append(cam_info['timestamp'] / 1e6)
+                image_paths.append(cam_info['data_path'])
+                # obtain lidar to image transformation matrix
+                lidar2cam_r = np.linalg.inv(cam_info['sensor2lidar_rotation'])
+                lidar2cam_t = cam_info[
+                    'sensor2lidar_translation'] @ lidar2cam_r.T
+                lidar2cam_rt = np.eye(4)
+                lidar2cam_rt[:3, :3] = lidar2cam_r.T
+                lidar2cam_rt[3, :3] = -lidar2cam_t
+                intrinsic = cam_info['cam_intrinsic']
+                viewpad = np.eye(4)
+                viewpad[:intrinsic.shape[0], :intrinsic.shape[1]] = intrinsic
+                lidar2img_rt = (viewpad @ lidar2cam_rt.T)
+                intrinsics.append(viewpad)
+                extrinsics.append(lidar2cam_rt)
+                lidar2img_rts.append(lidar2img_rt)
+
+            input_dict.update(
+                dict(
+                    img_timestamp=img_timestamp,
+                    img_filename=image_paths,
+                    lidar2img=lidar2img_rts,
+                    intrinsics=intrinsics,
+                    extrinsics=extrinsics
+                ))
+
+        if not self.test_mode:
+            annos = self.get_ann_info(index)
+            input_dict['ann_info'] = annos
+
+        return input_dict
+
+    def _evaluate_single(self,
+                         result_path,
+                         ret_iou,
+                         logger=None,
+                         metric='bbox',
+                         result_name='pts_bbox'):
+        """Evaluation for a single model in nuScenes protocol.
+
+        Args:
+            result_path (str): Path of the result file.
+            logger (logging.Logger | str | None): Logger used for printing
+                related information during evaluation. Default: None.
+            metric (str): Metric name used for evaluation. Default: 'bbox'.
+            result_name (str): Result name in the metric prefix.
+                Default: 'pts_bbox'.
+
+        Returns:
+            dict: Dictionary of evaluation details.
+        """
+
+        from nuscenes import NuScenes
+        from nuscenes.eval.detection.evaluate import NuScenesEval
+
+        output_dir = osp.join(*osp.split(result_path)[:-1])
+        nusc = NuScenes(
+            version=self.version, dataroot=self.data_root, verbose=False)
+        eval_set_map = {
+            'v1.0-mini': 'mini_val',
+            'v1.0-trainval': 'val',
+        }
+        nusc_eval = NuScenesEval(
+            nusc,
+            config=self.eval_detection_configs,
+            result_path=result_path,
+            eval_set=eval_set_map[self.version],
+            output_dir=output_dir,
+            verbose=False)
+        nusc_eval.main(render_curves=False)
+
+        ret_ious = []
+        cls_list = ["drive", "lane", "vehicle"]
+        print('\nEvaluating BEV segmentation')
+        for i in range(len(cls_list)):
+            ret_ious.append(ret_iou[i].item())
+            print('{}: {:.4f}'.format(cls_list[i], ret_ious[i]))
+
+        # record metrics
+        metrics = mmcv.load(osp.join(output_dir, 'metrics_summary.json'))
+        detail = dict()
+        metric_prefix = f'{result_name}_NuScenes'
+        for name in self.CLASSES:
+            for k, v in metrics['label_aps'][name].items():
+                val = float('{:.4f}'.format(v))
+                detail['{}/{}_AP_dist_{}'.format(metric_prefix, name, k)] = val
+            for k, v in metrics['label_tp_errors'][name].items():
+                val = float('{:.4f}'.format(v))
+                detail['{}/{}_{}'.format(metric_prefix, name, k)] = val
+            for k, v in metrics['tp_errors'].items():
+                val = float('{:.4f}'.format(v))
+                detail['{}/{}'.format(metric_prefix,
+                                      self.ErrNameMapping[k])] = val
+
+        detail['{}/NDS'.format(metric_prefix)] = metrics['nd_score']
+        detail['{}/mAP'.format(metric_prefix)] = metrics['mean_ap']
+        detail['{}/drive_iou'.format(metric_prefix)] = ret_ious[0]
+        detail['{}/lane_iou'.format(metric_prefix)] = ret_ious[1]
+        detail['{}/vehicle_iou'.format(metric_prefix)] = ret_ious[2]
+        return detail
+
+    def format_results(self, results, jsonfile_prefix=None):
+        """Format the results to json (standard format for COCO evaluation).
+
+        Args:
+            results (list[dict]): Testing results of the dataset.
+            jsonfile_prefix (str | None): The prefix of json files. It includes
+                the file path and the prefix of filename, e.g., "a/b/prefix".
+                If not specified, a temp file will be created. Default: None.
+
+        Returns:
+            tuple: Returns (result_files, tmp_dir), where `result_files` is a \
+                dict containing the json filepaths, `tmp_dir` is the temporal \
+                directory created for saving json files when \
+                `jsonfile_prefix` is not specified.
+        """
+        assert isinstance(results, list), 'results must be a list'
+        assert len(results) == len(self), (
+            'The length of results is not equal to the dataset len: {} != {}'.
+            format(len(results), len(self)))
+
+        if jsonfile_prefix is None:
+            tmp_dir = tempfile.TemporaryDirectory()
+            jsonfile_prefix = osp.join(tmp_dir.name, 'results')
+        else:
+            tmp_dir = None
+
+        # currently the output prediction results could be in two formats
+        # 1. list of dict('boxes_3d': ..., 'scores_3d': ..., 'labels_3d': ...)
+        # 2. list of dict('pts_bbox' or 'img_bbox':
+        #     dict('boxes_3d': ..., 'scores_3d': ..., 'labels_3d': ...))
+        # this is a workaround to enable evaluation of both formats on nuScenes
+        # refer to https://github.com/open-mmlab/mmdetection3d/issues/449
+        if not ('pts_bbox' in results[0] or 'img_bbox' in results[0]):
+            result_files = self._format_bbox(results, jsonfile_prefix)
+        else:
+            # should take the inner dict out of 'pts_bbox' or 'img_bbox' dict
+            result_files = dict()
+            for name in ['pts_bbox']:
+                print(f'\nFormating bboxes of {name}')
+                results_ = [out[name] for out in results]
+                tmp_file_ = osp.join(jsonfile_prefix, name)
+                result_files.update(
+                    {name: self._format_bbox(results_, tmp_file_)})
+        return result_files, tmp_dir
+
+    def evaluate(self,
+                 results,
+                 metric='bbox',
+                 logger=None,
+                 jsonfile_prefix=None,
+                 result_names=['pts_bbox'],
+                 show=False,
+                 out_dir=None,
+                 pipeline=None):
+        """Evaluation in nuScenes protocol.
+
+        Args:
+            results (list[dict]): Testing results of the dataset.
+            metric (str | list[str]): Metrics to be evaluated.
+            logger (logging.Logger | str | None): Logger used for printing
+                related information during evaluation. Default: None.
+            jsonfile_prefix (str | None): The prefix of json files. It includes
+                the file path and the prefix of filename, e.g., "a/b/prefix".
+                If not specified, a temp file will be created. Default: None.
+            show (bool): Whether to visualize.
+                Default: False.
+            out_dir (str): Path to save the visualization results.
+                Default: None.
+            pipeline (list[dict], optional): raw data loading for showing.
+                Default: None.
+
+        Returns:
+            dict[str, float]: Results of each evaluation metric.
+        """
+        result_files, tmp_dir = self.format_results(results, jsonfile_prefix)
+
+        res = [0, 0, 0]
+        for i in range(len(results)):
+            for tt in range(3):
+                res[tt] += results[i]['ret_iou'][tt]
+        n = len(results)
+        for i in range(len(res)):
+            res[i] = res[i] / n
+
+        if isinstance(result_files, dict):
+            results_dict = dict()
+            for name in result_names:
+                print('Evaluating bboxes of {}'.format(name))
+                ret_dict = self._evaluate_single(result_files[name], res)
+            results_dict.update(ret_dict)
+        elif isinstance(result_files, str):
+            results_dict = self._evaluate_single(result_files)
+
+        if tmp_dir is not None:
+            tmp_dir.cleanup()
+
+        if show:
+            self.show(results, out_dir, pipeline=pipeline)
+        return results_dict
 
 
 @DATASETS.register_module()

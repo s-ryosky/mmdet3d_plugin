@@ -192,7 +192,7 @@ db_sampler = dict(
         file_client_args=file_client_args))
 
 train_pipeline = [
-    dict(type='LoadMultiViewMultiSweepImageFromFiles', sweep_num=cam_sweep_num, to_float32=True),
+    dict(type='LoadMultiViewMultiSweepImageFromFiles_UVTR', sweep_num=cam_sweep_num, to_float32=True),
     dict(type='PhotoMetricDistortionMultiViewImage'),
     dict(type='LoadAnnotations3D', with_bbox_3d=True, with_label_3d=True, with_attr_label=False),
     dict(
@@ -207,7 +207,7 @@ train_pipeline = [
     dict(type='CollectUnified3D', keys=['gt_bboxes_3d', 'gt_labels_3d', 'img'])
 ]
 test_pipeline = [
-    dict(type='LoadMultiViewMultiSweepImageFromFiles', sweep_num=cam_sweep_num, to_float32=True),
+    dict(type='LoadMultiViewMultiSweepImageFromFiles_UVTR', sweep_num=cam_sweep_num, to_float32=True),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names),

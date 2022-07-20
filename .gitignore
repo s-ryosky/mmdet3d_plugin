@@ -16,5 +16,7 @@ __pycache__/
 *.log.json
 *.sh
 data/
+docker/mmdetection3d
+docker/test
 exps/
 work_dirs/

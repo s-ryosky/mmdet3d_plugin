@@ -49,6 +49,7 @@ def main():
     for err_name in ErrNames:
         result += print_str(f"{err_name}: {eval_results[err_name]:.4f}")
     result += print_str(f"NDS: {eval_results['NDS']:.4f}\n")
+
     result += print_str(f"Per-class results:")
     result += print_str(f"Object Class\tAP\tATE\tASE\tAOE\tAVE\tAAE")
     for cls_name in CLASSES:
@@ -65,6 +66,12 @@ def main():
         result += print_str(
             f"{cls_name}\t{ap:.3f}\t{ate:.3f}\t{ase:.3f}\t{aoe:.3f}\t{ave:.3f}\t{aae:.3f}"
         )
+
+    if "drive_iou" in eval_results.keys():
+        result += print_str(f"\nEvaluating BEV segmentation")
+        result += print_str(f"drive: {eval_results['drive_iou']:.4f}")
+        result += print_str(f"lane: {eval_results['lane_iou']:.4f}")
+        result += print_str(f"vehicle: {eval_results['vehicle_iou']:.4f}")
 
     print(result)
     with open(output_file, 'w') as fw:

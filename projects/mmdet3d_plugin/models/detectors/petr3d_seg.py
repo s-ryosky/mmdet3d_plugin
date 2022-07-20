@@ -7,19 +7,36 @@
 # Modified from mmdetection3d (https://github.com/open-mmlab/mmdetection3d)
 # Copyright (c) OpenMMLab. All rights reserved.
 # ------------------------------------------------------------------------
+import copy
+from einops import rearrange
+from os import path as osp
+
+import cv2
+import mmcv
+import numpy as np
 import torch
 
+from mmcv.parallel import DataContainer as DC
 from mmcv.runner import force_fp32, auto_fp16
 from mmdet3d.core import bbox3d2result
+from mmdet3d.core import (CameraInstance3DBoxes,LiDARInstance3DBoxes, bbox3d2result,
+                          show_multi_modality_result)
 from mmdet3d.models import DETECTORS
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 
 from mmdet3d_plugin.models.utils.grid_mask import GridMask
 
 
+def IOU (intputs,targets):
+    numerator = 2 * (intputs * targets).sum(dim=1)
+    denominator = intputs.sum(dim=1) + targets.sum(dim=1)
+    loss = (numerator + 0.01) / (denominator + 0.01)
+    return loss
+
+
 @DETECTORS.register_module()
-class Petr3D(MVXTwoStageDetector):
-    """Petr3D."""
+class Petr3D_seg(MVXTwoStageDetector):
+    """Detr3D."""
 
     def __init__(self,
                  use_grid_mask=False,
@@ -37,7 +54,7 @@ class Petr3D(MVXTwoStageDetector):
                  train_cfg=None,
                  test_cfg=None,
                  pretrained=None):
-        super(Petr3D, self).__init__(pts_voxel_layer, pts_voxel_encoder,
+        super(Petr3D_seg, self).__init__(pts_voxel_layer, pts_voxel_encoder,
                              pts_middle_encoder, pts_fusion_layer,
                              img_backbone, pts_backbone, img_neck, pts_neck,
                              pts_bbox_head, img_roi_head, img_rpn_head,
@@ -88,6 +105,7 @@ class Petr3D(MVXTwoStageDetector):
                           pts_feats,
                           gt_bboxes_3d,
                           gt_labels_3d,
+                          maps,
                           img_metas,
                           gt_bboxes_ignore=None):
         """Forward function for point cloud branch.
@@ -104,7 +122,8 @@ class Petr3D(MVXTwoStageDetector):
             dict: Losses of each branch.
         """
         outs = self.pts_bbox_head(pts_feats, img_metas)
-        loss_inputs = [gt_bboxes_3d, gt_labels_3d, outs]
+        
+        loss_inputs = [gt_bboxes_3d, gt_labels_3d, outs,maps]
         losses = self.pts_bbox_head.loss(*loss_inputs)
 
         return losses
@@ -131,6 +150,7 @@ class Petr3D(MVXTwoStageDetector):
                       gt_bboxes_3d=None,
                       gt_labels_3d=None,
                       gt_labels=None,
+                      maps=None,
                       gt_bboxes=None,
                       img=None,
                       proposals=None,
@@ -165,20 +185,39 @@ class Petr3D(MVXTwoStageDetector):
 
         losses = dict()
         losses_pts = self.forward_pts_train(img_feats, gt_bboxes_3d,
-                                            gt_labels_3d, img_metas,
+                                            gt_labels_3d, maps,img_metas,
                                             gt_bboxes_ignore)
         losses.update(losses_pts)
         return losses
-  
-    def forward_test(self, img_metas, img=None, **kwargs):
+    
+    def img_show(self, imgs):
+        import os
+        import cv2
+        import random
+        import numpy as np
+        mean= np.array([103.530, 116.280, 123.675])
+        mean = mean.reshape(1,1,3)
+        if not os.path.exists("./imgs"):
+            os.makedirs("./imgs")
+        name = str(random.randint(1,20))
+        for i in range(imgs.size(1)):
+            img = imgs[0][i]
+            img = img.permute(1, 2, 0).detach().cpu().numpy()
+            img = img + mean
+            # print(img)
+
+            cv2.imwrite("./imgs/"+name+"_"+str(i)+".png", img.astype(np.uint8))
+            print(img.shape)
+
+    def forward_test(self, img_metas,gt_map, maps,img=None, **kwargs):
         for var, name in [(img_metas, 'img_metas')]:
             if not isinstance(var, list):
                 raise TypeError('{} must be a list, but got {}'.format(
                     name, type(var)))
         img = [img] if img is None else img
-        return self.simple_test(img_metas[0], img[0], **kwargs)
+        return self.simple_test(img_metas[0], gt_map,img[0],maps, **kwargs)
 
-    def simple_test_pts(self, x, img_metas, rescale=False):
+    def simple_test_pts(self, x, img_metas, gt_map, maps, rescale=False):
         """Test function of point cloud branch."""
         outs = self.pts_bbox_head(x, img_metas)
         bbox_list = self.pts_bbox_head.get_bboxes(
@@ -187,17 +226,41 @@ class Petr3D(MVXTwoStageDetector):
             bbox3d2result(bboxes, scores, labels)
             for bboxes, scores, labels in bbox_list
         ]
-        return bbox_results
+
+        with torch.no_grad():
+            
+            lane_preds = outs['all_lane_preds'][5].squeeze(0)    # [B,N,H,W]
+            # lane_pred_obj = outs['all_lane_cls'][5].squeeze(0)     # [B,N,2]
+            n, w = lane_preds.size()
+            # lane_preds = maps[0][0]
+            
+            pred_maps = lane_preds.view(256, 3, 16, 16)
+
+
+            f_lane = rearrange(pred_maps, '(h w) c h1 w2 -> c (h h1) (w w2)', h=16, w=16)
+            f_lane = f_lane.sigmoid()
+            f_lane[f_lane >= 0.5] = 1
+            f_lane[f_lane < 0.5] = 0
+            f_lane_show = copy.deepcopy(f_lane)
+            gt_map_show = copy.deepcopy(gt_map[0])
+            
+            f_lane = f_lane.view(3,-1)
+            gt_map = gt_map[0].view(3,-1) 
+            
+            ret_iou = IOU(f_lane, gt_map).cpu()
+            
+        return bbox_results, ret_iou
     
-    def simple_test(self, img_metas, img=None, rescale=False):
+    def simple_test(self, img_metas,gt_map=None, img=None,maps=None, rescale=False):
         """Test function without augmentaiton."""
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
 
         bbox_list = [dict() for i in range(len(img_metas))]
-        bbox_pts = self.simple_test_pts(
-            img_feats, img_metas, rescale=rescale)
+        bbox_pts,ret_iou = self.simple_test_pts(
+            img_feats, img_metas, gt_map,maps,rescale=rescale)
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
+            result_dict['ret_iou'] = ret_iou
         return bbox_list
 
     def aug_test_pts(self, feats, img_metas, rescale=False):
@@ -225,4 +288,62 @@ class Petr3D(MVXTwoStageDetector):
         for result_dict, pts_bbox in zip(bbox_list, bbox_pts):
             result_dict['pts_bbox'] = pts_bbox
         return bbox_list
-    
+
+    def show_results(self, data, result, out_dir, score_thr=0.1):
+        """Results visualization.
+
+        Args:
+            data (list[dict]): Input images and the information of the sample.
+            result (list[dict]): Prediction results.
+            out_dir (str): Output directory of visualization result.
+        """
+
+        for batch_id in range(len(result)):
+            if isinstance(data['img_metas'][0], DC):
+                img_filename = data['img_metas'][0]._data[0][batch_id][
+                    'filename']
+                cam2img = data['img_metas'][0]._data[0][batch_id]['lidar2img']
+            elif mmcv.is_list_of(data['img_metas'][0], dict):
+                img_filename = data['img_metas'][0][batch_id]['filename']
+                cam2img = data['img_metas'][0][batch_id]['lidar2img']
+            else:
+                ValueError(
+                    f"Unsupported data type {type(data['img_metas'][0])} "
+                    f'for visualization!')
+
+            for i in range(len(img_filename)):
+                if "once" in img_filename[i]:
+                    img_path = img_filename[i].replace("/home/sunjianjian/workspace/temp/once_benchmark/data/","/data/Dataset/")
+                    img = mmcv.imread(img_path)
+                    
+                    file_name =  img_path.split("/")[-2] + osp.split(img_path)[-1].split('.')[0]
+                else:
+                    img_path = img_filename[i]
+                    img = mmcv.imread(img_path)
+                    file_name =  osp.split(img_path)[-1].split('.')[0]
+                print(file_name)
+                assert out_dir is not None, 'Expect out_dir, got none.'
+
+                pred_bboxes = result[batch_id]['pts_bbox']['boxes_3d']
+                pred_scores = result[batch_id]['pts_bbox']['scores_3d']
+                pred_labels = result[batch_id]['pts_bbox']['labels_3d']
+
+                mask = pred_scores> score_thr
+
+                pred_bboxes = pred_bboxes[mask]
+                pred_scores = pred_scores[mask]
+                pred_labels = pred_labels[mask]
+
+                assert isinstance(pred_bboxes, LiDARInstance3DBoxes), \
+                    f'unsupported predicted bbox type {type(pred_bboxes)}'
+                
+
+                show_multi_modality_result(
+                    img,
+                    None,
+                    pred_bboxes,
+                    cam2img[i],
+                    out_dir,
+                    file_name,
+                    'lidar',
+                    show=False)
